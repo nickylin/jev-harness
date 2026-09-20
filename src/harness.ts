@@ -3,26 +3,59 @@ import type {
   Decision,
   HarnessConfig,
   EvaluateFunction,
+  EvaluationContext,
+  Answers,
+  ProviderType,
 } from './types';
-import { defaultEvaluate } from './evaluate';
-
-const DEFAULT_MODEL = 'typesafe-ai/jev';
+import {
+  resolveProviderConfig,
+  createProvider,
+  type JevProvider,
+  type ProviderConfig,
+} from './providers';
 
 /**
  * The Harness class manages policies and evaluates states against them
  */
 export class Harness {
   private policies: Map<string, Policy> = new Map();
-  private model: string;
-  private apiKey?: string;
-  private baseURL?: string;
-  private evaluateFn: EvaluateFunction;
+  private providerConfig: ProviderConfig;
+  private provider: JevProvider | null = null;
+  private evaluateFn: EvaluateFunction | null;
 
   constructor(config: HarnessConfig = {}) {
-    this.model = config.model ?? DEFAULT_MODEL;
-    this.apiKey = config.apiKey;
-    this.baseURL = config.baseURL;
-    this.evaluateFn = config.evaluateFn ?? defaultEvaluate;
+    this.providerConfig = {
+      provider: config.provider ?? 'auto',
+      model: config.model,
+      apiKey: config.apiKey,
+      baseURL: config.baseURL,
+    };
+    this.evaluateFn = config.evaluateFn ?? null;
+  }
+
+  /**
+   * Get or create the provider instance (lazy initialization)
+   */
+  private getProvider(): JevProvider {
+    if (!this.provider) {
+      const resolved = resolveProviderConfig(this.providerConfig);
+      this.provider = createProvider(resolved);
+    }
+    return this.provider;
+  }
+
+  /**
+   * Internal evaluate function that uses provider or custom evaluateFn
+   */
+  private async internalEvaluate(context: EvaluationContext): Promise<Answers> {
+    if (this.evaluateFn) {
+      return this.evaluateFn(context, {
+        model: this.providerConfig.model ?? '',
+        apiKey: this.providerConfig.apiKey,
+        baseURL: this.providerConfig.baseURL,
+      });
+    }
+    return this.getProvider().evaluate(context);
   }
 
   /**
@@ -60,6 +93,13 @@ export class Harness {
   }
 
   /**
+   * Get the current provider type
+   */
+  getProviderType(): ProviderType {
+    return this.providerConfig.provider;
+  }
+
+  /**
    * Evaluate a state against a named policy
    */
   async evaluate<TState = unknown, TMeta = unknown>(
@@ -72,17 +112,10 @@ export class Harness {
       throw new Error(`Policy not found: ${policyName}`);
     }
 
-    const answers = await this.evaluateFn(
-      {
-        state,
-        questions: policy.questions,
-      },
-      {
-        model: this.model,
-        apiKey: this.apiKey,
-        baseURL: this.baseURL,
-      }
-    );
+    const answers = await this.internalEvaluate({
+      state,
+      questions: policy.questions,
+    });
 
     return policy.decide(answers, state);
   }
@@ -113,10 +146,30 @@ export class Harness {
    */
   withEvaluate(evaluateFn: EvaluateFunction): Harness {
     const harness = new Harness({
-      model: this.model,
-      apiKey: this.apiKey,
-      baseURL: this.baseURL,
+      provider: this.providerConfig.provider,
+      model: this.providerConfig.model,
+      apiKey: this.providerConfig.apiKey,
+      baseURL: this.providerConfig.baseURL,
       evaluateFn,
+    });
+
+    for (const [name, policy] of this.policies) {
+      harness.policies.set(name, policy);
+    }
+
+    return harness;
+  }
+
+  /**
+   * Create a new harness with a different provider
+   */
+  withProvider(provider: ProviderType): Harness {
+    const harness = new Harness({
+      provider,
+      model: this.providerConfig.model,
+      apiKey: this.providerConfig.apiKey,
+      baseURL: this.providerConfig.baseURL,
+      evaluateFn: this.evaluateFn ?? undefined,
     });
 
     for (const [name, policy] of this.policies) {

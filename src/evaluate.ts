@@ -9,7 +9,7 @@ interface ChatCompletionResponse {
 }
 
 /**
- * Build the evaluation prompt for the model
+ * Build the evaluation prompt for chat completion models
  */
 function buildPrompt(context: EvaluationContext): string {
   const lines: string[] = [
@@ -89,8 +89,9 @@ function parseResponse(text: string, questions: Question[]): Answers {
 }
 
 /**
- * Default evaluate function using AI SDK's experimental_evaluate pattern
- * Falls back to fetch-based implementation when AI SDK is not available
+ * Default evaluate function using Vercel AI Gateway
+ * @deprecated Use createHarness() with provider config instead
+ * Kept for backward compatibility
  */
 export const defaultEvaluate: EvaluateFunction = async (context, config) => {
   const apiKey = config.apiKey ?? process.env.AI_GATEWAY_API_KEY;
@@ -158,6 +159,39 @@ export function createFixtureEvaluate(
 
     if (!answers) {
       throw new Error(`No fixture found for state: ${stateKey}`);
+    }
+
+    return answers;
+  };
+}
+
+/**
+ * Create a mock evaluate function that simulates TypeSafe noul responses
+ * Useful for testing noul → boolean normalization
+ */
+export function createTypeSafeMockEvaluate(
+  mockAnswers: Record<string, boolean | string | number | { probability: number }>
+): EvaluateFunction {
+  return async (context) => {
+    const answers: Answers = {};
+
+    for (const q of context.questions) {
+      const value = mockAnswers[q.key];
+      if (value === undefined) continue;
+
+      if (q.type === 'boolean') {
+        if (typeof value === 'object' && 'probability' in value) {
+          answers[q.key] = value.probability >= 0.5;
+          answers[`${q.key}_probability`] = value.probability;
+        } else if (typeof value === 'boolean') {
+          answers[q.key] = value;
+        } else if (typeof value === 'number') {
+          answers[q.key] = value >= 0.5;
+          answers[`${q.key}_probability`] = value;
+        }
+      } else if (typeof value === 'string' || typeof value === 'number') {
+        answers[q.key] = value;
+      }
     }
 
     return answers;

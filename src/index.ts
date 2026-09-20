@@ -1,7 +1,30 @@
 // Core exports
 export { Harness, createHarness } from './harness';
 export { definePolicy, createPolicy, PolicyBuilder } from './policy';
-export { defaultEvaluate, createMockEvaluate, createFixtureEvaluate } from './evaluate';
+export {
+  defaultEvaluate,
+  createMockEvaluate,
+  createFixtureEvaluate,
+  createTypeSafeMockEvaluate,
+} from './evaluate';
+
+// Provider exports
+export {
+  resolveProviderConfig,
+  createProvider,
+  createAutoProvider,
+  detectProvider,
+  getProviderInfo,
+  TypeSafeProvider,
+  VercelGatewayProvider,
+  createTypeSafeProvider,
+  createVercelGatewayProvider,
+  toTypeSafeQuestion,
+  normalizeTypeSafeAnswer,
+  PROVIDER_ENV_VARS,
+  PROVIDER_DEFAULTS,
+  LIBRARY_TO_TYPESAFE_TYPE,
+} from './providers';
 
 // Helper exports
 export {
@@ -37,7 +60,20 @@ export type {
   HarnessConfig,
   EvaluationContext,
   EvaluateFunction,
+  ProviderType,
 } from './types';
+
+// Provider type exports
+export type {
+  ProviderConfig,
+  ResolvedProviderConfig,
+  JevProvider,
+  TypeSafeQuestionPrimitive,
+  TypeSafeQuestion,
+  TypeSafeRequest,
+  TypeSafeResponse,
+  TypeSafeAnswerValue,
+} from './providers';
 
 // Schema exports for validation
 export {

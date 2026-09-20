@@ -1,6 +1,10 @@
 # jev-harness
 
-Typed decision control plane for agents, powered by TypeSafe AI's [Jev](https://typesafe.ai) via Vercel AI Gateway.
+Typed decision control plane for agents, powered by [TypeSafe AI's Jev](https://typesafe.ai).
+
+Supports multiple Jev backends:
+- **TypeSafe Official** — Direct API at `api.typesafe.ai`
+- **Vercel AI Gateway** — Via Vercel's AI SDK gateway
 
 ![Architecture overview](docs/architecture.png)
 
@@ -11,6 +15,7 @@ Agent frameworks often struggle with structured decision-making. Raw LLM JSON ou
 - **Typed questions**: Define exactly what you need answered (boolean, choice, score, text)
 - **Typed decisions**: Get back `allow`, `deny`, `defer`, or `route` with confidence scores and metadata
 - **Policy-driven**: Bundle questions + decision logic into reusable, testable policies
+- **Multi-provider**: Choose TypeSafe official or Vercel AI Gateway with automatic detection
 - **Mock-friendly**: Swap in `createMockEvaluate()` for deterministic unit tests—no API calls needed
 
 ## Installation
@@ -23,7 +28,136 @@ pnpm add jev-harness
 
 **Peer dependency:** Requires `ai >= 3.0.0` for AI Gateway integration.
 
-## Quick Start: Store Review Triage
+## Quick Start
+
+### Provider Setup
+
+jev-harness auto-detects your provider based on environment variables:
+
+```bash
+# Option 1: TypeSafe Official (preferred)
+export TYPESAFE_API_KEY=your-typesafe-api-key
+
+# Option 2: Vercel AI Gateway
+export AI_GATEWAY_API_KEY=your-vercel-gateway-key
+```
+
+If both are set, TypeSafe Official takes priority.
+
+### Minimal Example
+
+```typescript
+import { createHarness, storeReviewTriage } from 'jev-harness';
+
+const harness = createHarness(); // auto-detects provider
+harness.register(storeReviewTriage);
+
+const decision = await harness.evaluate(
+  { text: "Love the app but it crashes on startup", stars: 4 },
+  'store-review-triage'
+);
+
+console.log(decision.action);     // 'route'
+console.log(decision.route);      // 'bug_ack'
+console.log(decision.confidence); // 0.9
+```
+
+### Explicit Provider Selection
+
+```typescript
+// Force TypeSafe Official
+const harness = createHarness({ provider: 'typesafe' });
+
+// Force Vercel AI Gateway
+const harness = createHarness({ provider: 'vercel-gateway' });
+
+// Auto-detect (default)
+const harness = createHarness({ provider: 'auto' });
+```
+
+## Provider Comparison
+
+| Feature | TypeSafe Official | Vercel AI Gateway |
+|---------|-------------------|-------------------|
+| Endpoint | `POST https://api.typesafe.ai/v1/systemone` | `POST https://api.vercel.ai/v1/chat/completions` |
+| Model | `jev-latest` | `typesafe-ai/jev` |
+| Auth Env Var | `TYPESAFE_API_KEY` | `AI_GATEWAY_API_KEY` |
+| Question Types | `noul`, `choice`, `score` | `boolean`, `choice`, `score`, `text` |
+| Boolean Responses | Probability 0-1 (normalized to boolean) | Direct boolean |
+
+### Question Type Mapping
+
+The library uses `boolean` in its API. When using TypeSafe Official, this is automatically mapped to `noul` (probability-based) and normalized back:
+
+```typescript
+// You write:
+booleanQuestion('is_spam', 'Is this spam?')
+
+// TypeSafe Official receives:
+{ type: 'noul', key: 'is_spam', prompt: 'Is this spam?' }
+
+// TypeSafe returns:
+{ is_spam: { probability: 0.87 } }
+
+// You receive (normalized):
+{ is_spam: true, is_spam_probability: 0.87 }
+```
+
+The raw probability is available as `${key}_probability` for advanced use cases.
+
+## Environment Variables
+
+| Variable | Provider | Description |
+|----------|----------|-------------|
+| `TYPESAFE_API_KEY` | TypeSafe Official | API key from [typesafe.ai](https://typesafe.ai) |
+| `AI_GATEWAY_API_KEY` | Vercel AI Gateway | API key from Vercel AI Gateway |
+
+### `.env.example`
+
+```bash
+# TypeSafe Official (preferred)
+TYPESAFE_API_KEY=your-typesafe-api-key
+
+# Vercel AI Gateway (alternative)
+AI_GATEWAY_API_KEY=your-vercel-gateway-key
+```
+
+## Testing with curl
+
+### TypeSafe Official
+
+```bash
+curl -X POST https://api.typesafe.ai/v1/systemone \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TYPESAFE_API_KEY" \
+  -d '{
+    "model": "jev-latest",
+    "state": { "text": "Great app!", "stars": 5 },
+    "questions": [
+      { "type": "noul", "key": "is_positive", "prompt": "Is the sentiment positive?" },
+      { "type": "choice", "key": "sentiment", "prompt": "Overall sentiment?", "choices": ["positive", "neutral", "negative"] }
+    ]
+  }'
+```
+
+### Vercel AI Gateway
+
+```bash
+curl -X POST https://api.vercel.ai/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $AI_GATEWAY_API_KEY" \
+  -d '{
+    "model": "typesafe-ai/jev",
+    "messages": [
+      { "role": "system", "content": "You are a precise evaluation assistant. Always respond with valid JSON only." },
+      { "role": "user", "content": "Given {\"text\": \"Great app!\", \"stars\": 5}, is the sentiment positive? Answer as JSON: {\"is_positive\": true/false}" }
+    ],
+    "temperature": 0,
+    "response_format": { "type": "json_object" }
+  }'
+```
+
+## Store Review Triage Policy
 
 ![Store review triage flow](docs/usage-store-review-triage.png)
 
@@ -32,11 +166,9 @@ Triage app store reviews into response queues with the built-in `storeReviewTria
 ```typescript
 import { createHarness, storeReviewTriage, createMockEvaluate } from 'jev-harness';
 
-// Create harness and register the built-in policy
 const harness = createHarness();
 harness.register(storeReviewTriage);
 
-// Evaluate a review
 const decision = await harness.evaluate(
   {
     text: "Love the app but it crashes on startup",
@@ -122,14 +254,18 @@ const simplePolicy = createPolicy({
 │  └─────────────┘    └─────────────┘    └──────────┬──────────┘   │
 └──────────────────────────────────────────────────────────────────┘
                                    │
-                                   │ questions + state
+                                   │ provider-specific request
                                    ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│              Jev (via AI Gateway / Vercel AI SDK)                │
-│                    model: typesafe-ai/jev                        │
+│                      Provider Abstraction                        │
+│  ┌─────────────────────┐    ┌───────────────────────────────┐    │
+│  │  TypeSafe Official  │    │     Vercel AI Gateway         │    │
+│  │  api.typesafe.ai    │    │     api.vercel.ai             │    │
+│  │  model: jev-latest  │    │     model: typesafe-ai/jev    │    │
+│  └─────────────────────┘    └───────────────────────────────┘    │
 └──────────────────────────────────┬───────────────────────────────┘
                                    │
-                                   │ answers (typed)
+                                   │ normalized answers
                                    ▼
 ┌──────────────────────────────────────────────────────────────────┐
 │                         Decision                                 │
@@ -137,8 +273,6 @@ const simplePolicy = createPolicy({
 │                 allow | deny | defer | route                     │
 └──────────────────────────────────────────────────────────────────┘
 ```
-
-See `docs/architecture.png` for the visual diagram.
 
 ## Testing with Mocks
 
@@ -185,6 +319,16 @@ fixtureHarness.register(storeReviewTriage);
 
 // Option 3: Swap evaluator on existing harness
 const testHarness = harness.withEvaluate(createMockEvaluate({ is_spam_or_irrelevant: true }));
+
+// Option 4: Mock TypeSafe noul responses with probabilities
+import { createTypeSafeMockEvaluate } from 'jev-harness';
+
+const noulMock = createTypeSafeMockEvaluate({
+  is_spam: { probability: 0.2 },      // false (< 0.5)
+  is_harmful: { probability: 0.9 },   // true (>= 0.5)
+  category: 'discussion',
+  quality: 0.85,
+});
 ```
 
 ## API Reference
@@ -202,9 +346,10 @@ const harness = new Harness(config?: HarnessConfig);
 
 // HarnessConfig options
 interface HarnessConfig {
-  model?: string;           // Default: 'typesafe-ai/jev'
-  apiKey?: string;          // Default: process.env.AI_GATEWAY_API_KEY
-  baseURL?: string;         // Default: 'https://api.vercel.ai/v1'
+  provider?: 'typesafe' | 'vercel-gateway' | 'auto';  // Default: 'auto'
+  model?: string;           // Provider-specific default
+  apiKey?: string;          // Provider-specific env var default
+  baseURL?: string;         // Provider-specific default
   evaluateFn?: EvaluateFunction;  // Custom evaluator for testing
 }
 
@@ -216,6 +361,31 @@ harness.listPolicies();                // List registered policy names
 harness.evaluate(state, policyName);   // Evaluate state against policy
 harness.evaluateAll(state, names?);    // Evaluate against multiple policies
 harness.withEvaluate(fn);              // Clone with custom evaluator
+harness.withProvider(provider);        // Clone with different provider
+harness.getProviderType();             // Get current provider type
+```
+
+### Provider Utilities
+
+```typescript
+import {
+  detectProvider,
+  resolveProviderConfig,
+  createProvider,
+  getProviderInfo,
+} from 'jev-harness';
+
+// Auto-detect provider from environment
+const detected = detectProvider();
+// { provider: 'typesafe', apiKey: '...' } or null
+
+// Resolve full config with defaults
+const config = resolveProviderConfig({ provider: 'auto' });
+// { provider: 'typesafe', apiKey: '...', baseURL: '...', model: '...' }
+
+// Get provider info for diagnostics
+const info = getProviderInfo();
+// { provider: 'typesafe', baseURL: '...', model: '...', envVar: 'TYPESAFE_API_KEY' }
 ```
 
 ### Question Helpers
@@ -244,6 +414,9 @@ const category = getChoice(answers, 'category');     // string | undefined
 const score = getScore(answers, 'confidence');       // number (default: 0)
 const desc = getText(answers, 'description');        // string (default: '')
 const passes = meetsThreshold(answers, 'score', 0.7); // boolean
+
+// Access raw probability from TypeSafe noul responses
+const prob = getScore(answers, 'is_spam_probability'); // 0-1
 ```
 
 ### Decision Builders
@@ -281,6 +454,10 @@ import type {
   HarnessConfig,
   EvaluationContext,
   EvaluateFunction,
+  ProviderType,        // 'typesafe' | 'vercel-gateway' | 'auto'
+  ProviderConfig,
+  ResolvedProviderConfig,
+  JevProvider,
 } from 'jev-harness';
 
 // Built-in policy types
@@ -315,26 +492,22 @@ Run the included example to see store review triage in action:
 # With mock evaluator (no API key needed)
 pnpm example
 
-# With live Jev API
+# With live Jev API (uses auto-detected provider)
+TYPESAFE_API_KEY=your-key pnpm example --live
+# or
 AI_GATEWAY_API_KEY=your-key pnpm example --live
 
 # Evaluate a custom review
 pnpm example --review "This app is amazing but needs dark mode"
 ```
 
-## Configuration
+## Future Providers
 
-### Environment Variables
+The provider abstraction is designed to support additional backends. Potential future providers:
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `AI_GATEWAY_API_KEY` | API key for Vercel AI Gateway | Required for live evaluation |
+- **Cloudflare Workers AI** — `typesafe/jev` model (not yet implemented)
 
-### `.env.example`
-
-```bash
-AI_GATEWAY_API_KEY=your-api-key-here
-```
+To add a new provider, implement the `JevProvider` interface and add it to the provider factory.
 
 ## Contributing
 

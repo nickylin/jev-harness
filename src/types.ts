@@ -95,14 +95,26 @@ export interface Policy<TState = unknown, TMeta = unknown> {
 }
 
 /**
+ * Provider type for Jev backends
+ */
+export type ProviderType = 'typesafe' | 'vercel-gateway' | 'auto';
+
+/**
  * Harness configuration
  */
 export interface HarnessConfig {
-  /** Model ID (default: 'typesafe-ai/jev') */
+  /**
+   * Provider to use for Jev evaluation
+   * - 'typesafe': TypeSafe official API (api.typesafe.ai)
+   * - 'vercel-gateway': Vercel AI Gateway
+   * - 'auto': Auto-detect based on available API keys (default)
+   */
+  provider?: ProviderType;
+  /** Model ID (provider-specific default if not set) */
   model?: string;
-  /** API key (reads AI_GATEWAY_API_KEY by default) */
+  /** API key (provider-specific env var used if not set) */
   apiKey?: string;
-  /** Base URL for the AI Gateway */
+  /** Base URL override */
   baseURL?: string;
   /** Custom evaluate function for testing/mocking */
   evaluateFn?: EvaluateFunction;
