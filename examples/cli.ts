@@ -4,12 +4,25 @@
  *
  * Usage:
  *   pnpm example                    # Run with mock data
- *   pnpm example --live             # Run with live Jev API (requires AI_GATEWAY_API_KEY)
+ *   pnpm example --live             # Run with live Jev API (auto-detects provider)
+ *   pnpm example --live --provider typesafe      # Force TypeSafe official
+ *   pnpm example --live --provider vercel-gateway # Force Vercel AI Gateway
  *   pnpm example --review "text"    # Evaluate a specific review
  */
 
-import { createHarness, storeReviewTriage, createMockEvaluate } from '../src';
-import type { StoreReviewState, Decision, StoreReviewMeta } from '../src';
+import {
+  createHarness,
+  storeReviewTriage,
+  createMockEvaluate,
+  getProviderInfo,
+  detectProvider,
+} from '../src';
+import type {
+  StoreReviewState,
+  Decision,
+  StoreReviewMeta,
+  ProviderType,
+} from '../src';
 import { sampleReviews, getAnswersForReview } from './fixtures';
 
 const COLORS = {
@@ -72,19 +85,33 @@ async function runWithMocks(): Promise<void> {
   }
 }
 
-async function runLive(reviewText?: string): Promise<void> {
-  if (!process.env.AI_GATEWAY_API_KEY) {
+async function runLive(
+  reviewText?: string,
+  providerOverride?: ProviderType
+): Promise<void> {
+  const detected = detectProvider();
+  if (!detected && !providerOverride) {
     console.error(
-      `${COLORS.red}Error: AI_GATEWAY_API_KEY is required for live mode${COLORS.reset}`
+      `${COLORS.red}Error: No API key found.${COLORS.reset}`
     );
-    console.error('Set it in your environment or create a .env file');
+    console.error('Set TYPESAFE_API_KEY or AI_GATEWAY_API_KEY in your environment.');
+    console.error('');
+    console.error('Examples:');
+    console.error('  TYPESAFE_API_KEY=your-key pnpm example --live');
+    console.error('  AI_GATEWAY_API_KEY=your-key pnpm example --live');
     process.exit(1);
   }
 
-  console.log(`${COLORS.bright}Running with live Jev API${COLORS.reset}\n`);
-
-  const harness = createHarness();
+  const provider = providerOverride ?? 'auto';
+  const harness = createHarness({ provider });
   harness.register(storeReviewTriage);
+
+  const info = getProviderInfo({ provider });
+  console.log(`${COLORS.bright}Running with live Jev API${COLORS.reset}`);
+  console.log(`  Provider: ${COLORS.cyan}${info.provider}${COLORS.reset}`);
+  console.log(`  Endpoint: ${info.baseURL}`);
+  console.log(`  Model: ${info.model}`);
+  console.log('');
 
   const reviews: StoreReviewState[] = reviewText
     ? [{ text: reviewText }]
@@ -111,6 +138,19 @@ async function main(): Promise<void> {
   const isLive = args.includes('--live');
   const reviewIndex = args.indexOf('--review');
   const customReview = reviewIndex !== -1 ? args[reviewIndex + 1] : undefined;
+  const providerIndex = args.indexOf('--provider');
+  const providerArg = providerIndex !== -1 ? args[providerIndex + 1] : undefined;
+
+  let providerOverride: ProviderType | undefined;
+  if (providerArg) {
+    if (providerArg === 'typesafe' || providerArg === 'vercel-gateway' || providerArg === 'auto') {
+      providerOverride = providerArg;
+    } else {
+      console.error(`${COLORS.red}Invalid provider: ${providerArg}${COLORS.reset}`);
+      console.error('Valid providers: typesafe, vercel-gateway, auto');
+      process.exit(1);
+    }
+  }
 
   console.log(`
 ${COLORS.cyan}╔═══════════════════════════════════════════╗
@@ -119,7 +159,7 @@ ${COLORS.cyan}╔═════════════════════
 `);
 
   if (isLive) {
-    await runLive(customReview);
+    await runLive(customReview, providerOverride);
   } else {
     await runWithMocks();
   }
