@@ -1,0 +1,47 @@
+name: Sync GitHub traffic to Notion
+
+on:
+  schedule:
+    # 09:00 China time — GitHub traffic stats settle after UTC midnight
+    - cron: "0 1 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    name: Sync last 14 days
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check required secrets
+        env:
+          TRAFFIC_GITHUB_TOKEN: ${{ secrets.TRAFFIC_GITHUB_TOKEN }}
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+        run: |
+          missing=0
+          if [ -z "$TRAFFIC_GITHUB_TOKEN" ]; then
+            echo "::error::Add repository secret TRAFFIC_GITHUB_TOKEN (classic PAT with repo scope)."
+            missing=1
+          fi
+          if [ -z "$NOTION_TOKEN" ]; then
+            echo "::error::Add repository secret NOTION_TOKEN, then connect that Notion integration to the private GitHub Traffic Stats database."
+            missing=1
+          fi
+          exit "$missing"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Write traffic rows to Notion
+        env:
+          TRAFFIC_GITHUB_TOKEN: ${{ secrets.TRAFFIC_GITHUB_TOKEN }}
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_DATABASE_ID: ${{ vars.NOTION_DATABASE_ID }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: node scripts/sync-github-traffic.mjs

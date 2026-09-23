@@ -28,6 +28,7 @@
     "lint": "eslint src --ext .ts",
     "typecheck": "tsc --noEmit",
     "example": "tsx examples/cli.ts",
+    "sync:traffic": "node scripts/sync-github-traffic.mjs",
     "prepublishOnly": "pnpm build"
   },
   "keywords": [
